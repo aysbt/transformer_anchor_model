@@ -84,7 +84,7 @@ def mean_std(df, group_cols, value_cols):
 def main(args):
     t0 = time.time()
     seeds = [int(s) for s in args.seeds.split(",")]
-    model = args.model
+    model = args.model if args.use_anchor else f"{args.model}_noanchor"
     py = sys.executable
 
     banner(f"MULTI-SEED EXPERIMENT   model={model}   seeds={seeds}")
@@ -95,12 +95,14 @@ def main(args):
     if not args.skip_runs:
         for i, seed in enumerate(seeds, 1):
             banner(f"SEED {seed}   ({i}/{len(seeds)})", "-")
-            run([py, "train.py", "--model", model, "--seed", str(seed),
+            run([py, "train.py", "--model", args.model, "--seed", str(seed),
+                 "--use_anchor", str(args.use_anchor),
                  "--num_epochs", str(args.num_epochs),
                  "--batch_size", str(args.batch_size),
                  "--verbose_every", str(args.verbose_every),
                  "--csv_path", args.trainval_csv])
-            run([py, "test.py", "--model", model, "--seed", str(seed),
+            run([py, "test.py", "--model", args.model, "--seed", str(seed),
+                 "--use_anchor", str(args.use_anchor),
                  "--trainval_csv", args.trainval_csv,
                  "--test_csv", args.test_csv, "--regimes", args.regimes])
             print(f"   seed {seed} complete")
@@ -109,19 +111,20 @@ def main(args):
     banner("AGGREGATING ACROSS SEEDS")
 
     val = pd.concat([pd.read_csv(p) for p in
-                     glob.glob(f"results/metrics_val_{model}_*.csv")], ignore_index=True)
+                     glob.glob(f"results/metrics_val_{model}_[0-9]*.csv")], ignore_index=True)
     test = pd.concat([pd.read_csv(p) for p in
-                      glob.glob(f"results/metrics_test_{model}_*.csv")], ignore_index=True)
+                      glob.glob(f"results/metrics_test_{model}_[0-9]*.csv")], ignore_index=True)
     regs = pd.concat([pd.read_csv(p) for p in
-                      glob.glob(f"results/test_region_metrics_{model}_*.csv")],
+                      glob.glob(f"results/test_region_metrics_{model}_[0-9]*.csv")],
                      ignore_index=True)
 
     n_seeds_actual = int(test.seed.nunique())
     metric_cols = ["rmse_keV", "mae_keV", "bias_keV", "median_abs_keV",
                    "within_250keV", "within_500keV"]
 
-    val_s = mean_std(val, ["model"], metric_cols)
-    test_cols = metric_cols + [c for c in ("rmse_s1_keV", "rmse_s2_keV") if c in test]
+    stage_cols = ["rmse_s1_keV", "mae_s1_keV", "rmse_s2_keV", "mae_s2_keV"]
+    val_s = mean_std(val, ["model"], metric_cols + [c for c in stage_cols if c in val])
+    test_cols = metric_cols + [c for c in stage_cols if c in test]
     test_s = mean_std(test, ["regime"], test_cols)
     reg_s = mean_std(regs[regs.regime == args.headline_regime],
                      ["region"], ["rmse_keV", "mae_keV"])
@@ -150,7 +153,7 @@ def main(args):
               f"{r['mae_keV_mean']:>11.2f}{r['mae_keV_std']:>10.2f}"
               f"{r['within_250keV_mean']*100:>9.1f}%")
 
-    if "rmse_s1_keV_mean" in test_s:
+    if "rmse_s2_keV_mean" in test_s:
         print(f"\n   STAGE DECOMPOSITION  (regime '{args.headline_regime}')")
         h = test_s[test_s.regime == args.headline_regime].iloc[0]
         print(f"   {'S1  LSMF only':<28}{h['rmse_s1_keV_mean']:>10.1f} "
@@ -162,6 +165,14 @@ def main(args):
         gain = h["rmse_s2_keV_mean"] - h["rmse_keV_mean"]
         print(f"   network contribution        {gain:>10.1f} keV "
               f"({100*gain/max(h['rmse_s2_keV_mean'],1e-9):.1f}%)")
+
+    elif "rmse_s1_keV_mean" in test_s:
+        h = test_s[test_s.regime == args.headline_regime].iloc[0]
+        print(f"\n   STAGE DECOMPOSITION  (no anchor)")
+        print(f"   {'S1  LSMF only':<28}{h['rmse_s1_keV_mean']:>10.1f} "
+              f"+/- {h['rmse_s1_keV_std']:<8.1f} keV")
+        print(f"   {'S1+S3  + transformer':<28}{h['rmse_keV_mean']:>10.1f} "
+              f"+/- {h['rmse_keV_std']:<8.1f} keV")
 
     print(f"\n   REGIONAL  (regime '{args.headline_regime}')")
     print(f"   {'region':<15}{'n_seeds':>9}{'RMSE mean':>12}{'RMSE std':>11}"
@@ -258,6 +269,7 @@ if __name__ == "__main__":
     ap.add_argument("--test_csv", default="data/test.csv")
     ap.add_argument("--regimes", default="historical,train,loo")
     ap.add_argument("--headline_regime", default="historical")
+    ap.add_argument("--use_anchor", type=int, default=1)
     ap.add_argument("--skip_runs", action="store_true",
                     help="only aggregate results already on disk")
     main(ap.parse_args())

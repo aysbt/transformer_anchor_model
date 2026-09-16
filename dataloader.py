@@ -99,30 +99,34 @@ class NuclearMassDataset(Dataset):
         # ------------------------------------------------------------
         # 3. Anchor context
         # ------------------------------------------------------------
-        if self.use_anchor:
-            if anchor_context is None:
-                if split != "train":
-                    raise ValueError(
-                        "anchor_context must be supplied for val/test. Only the "
-                        "train split may build its own dictionary."
-                    )
-                anchor_context = AnchorContext(
-                    regime="train",
-                    max_radius=anchor_max_radius,
-                    min_neighbors=anchor_min_neighbors,
+        # Stage 1 (LSMF) is ALWAYS subtracted. use_anchor only switches Stage 2,
+        # so use_anchor=False is the "LSMF + Transformer" model.
+        if anchor_context is None:
+            if split != "train":
+                raise ValueError(
+                    "anchor_context must be supplied for val/test. Only the "
+                    "train split may fit Stage 1 and build its own dictionary."
                 )
-                anchor_context.fit_baseline(N, Z, y)      # Stage 1 on train only
+            anchor_context = AnchorContext(
+                regime="train",
+                max_radius=anchor_max_radius,
+                min_neighbors=anchor_min_neighbors,
+            )
+            anchor_context.fit_baseline(N, Z, y)          # Stage 1 on train only
+            if self.use_anchor:
                 anchor_context.set_dictionary(N, Z, y)    # dictionary = train rows
-            self.anchor_context = anchor_context
+            else:
+                anchor_context.dict_size_ = 0
+        self.anchor_context = anchor_context
 
+        if self.use_anchor:
             offset, anchor_feats = anchor_context.offset_and_features(N, Z)
             for name in ANCHOR_FEATURES:
                 self.data[name] = anchor_feats[name]
                 if name not in self.continuous_features:
                     self.continuous_features.append(name)
         else:
-            self.anchor_context = None
-            offset = np.zeros(len(self.data))
+            offset = anchor_context.baseline.predict(N, Z)
 
         self.offset = offset
         residual = y - offset

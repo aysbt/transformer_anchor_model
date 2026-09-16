@@ -176,13 +176,14 @@ def draw_split_figure(trainval, test, outpath, seed=42):
         label=f"Test",
     )
 
-    plt.xlabel("Neutron Number (N)", fontsize=18)
-    plt.ylabel("Proton Number (Z)", fontsize=18)
+    plt.xlabel("Neutron Number (N)", fontsize=24)
+    plt.ylabel("Proton Number (Z)", fontsize=24)
+    plt.tick_params(axis='both', which='major', labelsize=18) 
     #plt.title("Train, Validation, and Test Distribution in (N, Z)")
     plt.grid(alpha=0.30)
-    plt.legend()
+    plt.legend(fontsize=24)
     plt.tight_layout()
-    plt.savefig(outpath, dpi=250, bbox_inches="tight")
+    plt.savefig(outpath, dpi=350, bbox_inches="tight")
     plt.close()
 
     return train, val, excluded

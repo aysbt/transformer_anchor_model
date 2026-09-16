@@ -1,0 +1,20 @@
+% ---- Table: performance by anchor dictionary ----
+\begin{table}[htbp]\centering
+\caption{Performance on the 71 nuclei first measured in AME2020, as a function of the neighbour masses the local anchor is permitted to use. Values are mean $\pm$ standard deviation over 5 independent trainings. The \emph{historical} regime uses only masses known in AME2016 and is the prospective result; \emph{leave-one-out} allows test nuclei to support one another and is reported for reference only.}
+\label{tab:regimes}
+\begin{tabular}{lccc}\hline\hline
+Neighbour dictionary & RMSE (keV) & MAE (keV) & within 250 keV \\ \hline
+Historical (AME2016 only) & $536 \pm 96$ & $411 \pm 75$ & $37\%$ \\
+\hline\hline\end{tabular}\end{table}
+
+% ---- Table: regional performance ----
+\begin{table}[htbp]\centering
+\caption{Regional RMSE on the chronological test set (historical anchor dictionary), mean $\pm$ standard deviation over 5 trainings.}
+\label{tab:regions}
+\begin{tabular}{lcc}\hline\hline
+Region & RMSE (keV) & MAE (keV) \\ \hline
+Light & $668 \pm 182$ & $541 \pm 122$ \\
+Medium & $504 \pm 87$ & $377 \pm 72$ \\
+Heavy & $408 \pm 106$ & $348 \pm 85$ \\
+Heavy Exotic & $616 \pm 254$ & $519 \pm 183$ \\
+\hline\hline\end{tabular}\end{table}

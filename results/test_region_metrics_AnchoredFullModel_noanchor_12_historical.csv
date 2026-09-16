@@ -1,0 +1,5 @@
+region,count,rmse_keV,mae_keV,bias_keV,max_abs_keV,model,seed,regime
+light,11,620.2851614088651,515.8775745738636,-108.28062855113636,1136.173828125,AnchoredFullModel_noanchor,12,historical
+medium,40,420.76008844956914,297.67353515625,-19.72587890625,1346.36328125,AnchoredFullModel_noanchor,12,historical
+heavy,13,320.84328405847424,289.6398737980769,-100.85802283653847,498.873046875,AnchoredFullModel_noanchor,12,historical
+heavy exotic,7,460.09028229508874,384.5122767857143,352.1171875,816.8671875,AnchoredFullModel_noanchor,12,historical

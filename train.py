@@ -78,8 +78,9 @@ def main(args):
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    model_name = args.model
-    selected = FEATURE_SETS[model_name]
+    selected = FEATURE_SETS[args.model]
+    # no-anchor runs get their own name so they never overwrite anchored results
+    model_name = args.model if args.use_anchor else f"{args.model}_noanchor"
 
     banner(f"TRAINING  {model_name}   seed {args.seed}")
     print(f"   device              : {device}")
@@ -122,10 +123,10 @@ def main(args):
     print(f"   continuous features : {len(cont_feats)}")
     print(f"     {cont_feats}")
     print(f"   categorical features: {cat_feats}  sizes {cat_sizes}")
+    print(f"\n   Stage 1  LSMF train RMSE      : {anchor_ctx.baseline_rmse_:10.1f} keV")
     if args.use_anchor:
         N_tr = train_loader.dataset.data["original_N"].to_numpy(int)
         Z_tr = train_loader.dataset.data["original_Z"].to_numpy(int)
-        print(f"\n   Stage 1  LSMF train RMSE      : {anchor_ctx.baseline_rmse_:10.1f} keV")
         print(f"   Stage 2  anchor dictionary    : {anchor_ctx.dict_size_} nuclei "
               f"(regime='{anchor_ctx.regime}')")
         off = train_loader.dataset.offset
@@ -136,7 +137,7 @@ def main(args):
         print(f"   nuclei with an anchor         : "
               f"{int(_af['anchor_has'].sum())} / {len(N_tr)}")
         print(f"   mean neighbours used          : {_af['anchor_n'].mean():10.1f}")
-    print(f"\n   target = anchored residual, standardised")
+    print(f"\n   target = {'anchored' if args.use_anchor else 'LSMF'} residual, standardised")
     print(f"     residual mean     : {target_mean:10.2f} keV")
     print(f"     residual std      : {target_std:10.2f} keV")
 
@@ -158,7 +159,7 @@ def main(args):
     print(f"   trainable parameters: {n_params:,}")
 
     torch.save({"preprocess_stats": stats,
-                "anchor_state": anchor_ctx.state_dict() if anchor_ctx else None,
+                "anchor_state": anchor_ctx.state_dict(),
                 "selected_features": selected,
                 "continuous_features": cont_feats,
                 "categorical_features": cat_feats,
@@ -179,7 +180,7 @@ def main(args):
                               patience=args.patience,
                               verbose_every=args.verbose_every)
 
-    model.load_state_dict(torch.load(ckpt, map_location=device))
+    model.load_state_dict(torch.load(ckpt, map_location=device, weights_only=True))
     model.eval()
 
     # ---------------------------------------------------------- evaluation
@@ -190,24 +191,30 @@ def main(args):
     m_full = ev.compute_metrics(preds, acts)
     ev.print_metrics(m_full, f"{model_name} — validation set (keV)")
 
+    m_s1 = ev.compute_metrics(
+        anchor_ctx.baseline.predict(N.astype(int), Z.astype(int)), acts)
+    print("\n   stage decomposition")
+    print(ev.fmt_row(m_s1, "S1  LSMF only"))
     if args.use_anchor:
-        m_s1 = ev.compute_metrics(
-            anchor_ctx.baseline.predict(N.astype(int), Z.astype(int)), acts)
         m_s2 = ev.compute_metrics(offsets, acts)
-        print("\n   stage decomposition")
-        print(ev.fmt_row(m_s1, "S1  LSMF only"))
         print(ev.fmt_row(m_s2, "S1+S2  + local anchor"))
         print(ev.fmt_row(m_full, "S1+S2+S3  + transformer"))
         ev.plot_stage_waterfall(
             [("S1", m_s1["rmse_keV"]), ("S1+S2", m_s2["rmse_keV"]),
              ("S1+S2+S3", m_full["rmse_keV"])], f"{model_name}_s{args.seed}")
+    else:
+        print(ev.fmt_row(m_full, "S1+S3  + transformer"))
 
     reg = ev.compute_region_metrics(N, Z, preds, acts)
     ev.print_region_table(reg, f"{model_name} — regional performance (validation)")
 
     # ------------------------------------------------------------- outputs
-    pd.DataFrame([{**m_full, "model": model_name, "seed": args.seed,
-                   "split": "val", "use_anchor": args.use_anchor}]).to_csv(
+    row = {**m_full, "model": model_name, "seed": args.seed, "split": "val",
+           "use_anchor": args.use_anchor, "rmse_s1_keV": m_s1["rmse_keV"],
+           "mae_s1_keV": m_s1["mae_keV"]}
+    if args.use_anchor:
+        row.update(rmse_s2_keV=m_s2["rmse_keV"], mae_s2_keV=m_s2["mae_keV"])
+    pd.DataFrame([row]).to_csv(
         f"results/metrics_val_{model_name}_{args.seed}.csv", index=False)
     reg.assign(model=model_name, seed=args.seed).to_csv(
         f"results/region_metrics_{model_name}_{args.seed}.csv", index=False)
@@ -235,16 +242,16 @@ def main(args):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv_path", default="data/trainval.csv")
-    ap.add_argument("--model", default="AnchoredFullModel", choices=list(FEATURE_SETS))
-    ap.add_argument("--batch_size", type=int, default=16)
+    ap.add_argument("--model", default="MagicModel", choices=list(FEATURE_SETS))
+    ap.add_argument("--batch_size", type=int, default=32)
     ap.add_argument("--num_epochs", type=int, default=200)
     ap.add_argument("--lr", type=float, default=2e-3)
-    ap.add_argument("--seed", type=int, default=12)
-    ap.add_argument("--patience", type=int, default=20)
+    ap.add_argument("--seed", type=int, default=89)
+    ap.add_argument("--patience", type=int, default=200)
     ap.add_argument("--verbose_every", type=int, default=5)
     ap.add_argument("--use_anchor", type=int, default=1)
     ap.add_argument("--anchor_radius", type=int, default=3)
-    ap.add_argument("--anchor_min_neighbors", type=int, default=10)
+    ap.add_argument("--anchor_min_neighbors", type=int, default=14)
     a = ap.parse_args()
     a.use_anchor = bool(a.use_anchor)
     main(a)

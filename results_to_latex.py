@@ -44,11 +44,14 @@ PRETTY = {
     "within_500keV": "$f_{500}$",
     "rmse_s1_keV": "Stage-1 RMSE (keV)",
     "rmse_s2_keV": "Stage-2 RMSE (keV)",
+    "mae_s1_keV": "Stage-1 MAE (keV)",
+    "mae_s2_keV": "Stage-2 MAE (keV)",
 }
 
 MODEL_ORDER = [
     "CoreModel", "ShellModel", "ZEOModel", "MagicModel",
     "LiquidDropModel", "ValenceModel", "AnchoredFullModel",
+    "AnchoredFullModel_noanchor",
 ]
 REGIME_ORDER = ["historical", "train", "loo"]
 REGION_ORDER = ["very light", "light", "medium", "heavy", "heavy exotic"]

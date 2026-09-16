@@ -23,12 +23,24 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib import gridspec
 
-plt.rcParams.update({"figure.dpi": 120, "savefig.dpi": 160, "font.size": 10,
+# Paper-wide typography: use 22 pt axis labels and 20 pt tick labels so that
+# labels remain legible after a figure is reduced to a journal column/page width.
+plt.rcParams.update({"figure.dpi": 120, "savefig.dpi": 300, "font.size": 20,
+                     "axes.labelsize": 22, "xtick.labelsize": 20,
+                     "ytick.labelsize": 20, "legend.fontsize": 18,
                      "axes.grid": True, "grid.alpha": 0.25, "axes.axisbelow": True,
                      "figure.facecolor": "white", "savefig.bbox": "tight"})
 
 PLOTS = "plots"
 RESULTS = "results"
+
+# Shared paper palette and signed-error scale.  Do not estimate this limit per
+# model: identical colours must always represent identical errors in every
+# model-comparison figure.
+ERROR_CMAP = "coolwarm"
+ERROR_COLOR_LIMIT_KEV = 1000.0
+PROTON_PANEL_COLOR = "tab:blue"
+NEUTRON_PANEL_COLOR = "tab:green"
 
 
 # --------------------------------------------------------------- inference
@@ -165,31 +177,57 @@ def _save(fig, name):
 
 
 def plot_error_diagnostics(N, Z, preds_keV, acts_keV, model_name, clip=None):
+    """N--Z signed-error map with one adjacent proton-number residual panel.
+
+    The side panel shows residuals versus proton number Z and the bottom panel
+    shows residuals versus neutron number N.  The N--Z map has no duplicate
+    proton-number axis labels or ticks.
+    """
     err = np.asarray(preds_keV) - np.asarray(acts_keV)
     if clip is None:
-        clip = max(np.percentile(np.abs(err), 98), 1e-6)
+        clip = ERROR_COLOR_LIMIT_KEV
 
-    fig = plt.figure(figsize=(11, 8))
-    gs = gridspec.GridSpec(2, 2, width_ratios=[1, 4], height_ratios=[4, 1],
-                           wspace=0.06, hspace=0.08)
-    ax = fig.add_subplot(gs[0, 1])
-    sc = ax.scatter(N, Z, c=err, cmap="coolwarm", s=18, vmin=-clip, vmax=clip,
+    fig = plt.figure(figsize=(12, 9))
+    # The two panels deliberately share their boundary: the small white gap
+    # comes only from the axes spines, not GridSpec padding.
+    # The colour bar has its own outer column.  It therefore cannot resize the
+    # map independently of the green N-residual panel below it.
+    gs = gridspec.GridSpec(2, 3, width_ratios=[1.15, 4, 0.16],
+                           height_ratios=[4, 1], wspace=0.0, hspace=0.0)
+    axl = fig.add_subplot(gs[0, 0])
+    ax = fig.add_subplot(gs[0, 1], sharey=axl)
+    sc = ax.scatter(N, Z, c=err, cmap=ERROR_CMAP, s=18, vmin=-clip, vmax=clip,
                     edgecolors="none")
-    ax.set_xlabel("Neutron number $N$"); ax.set_ylabel("Proton number $Z$")
+    # The shared neutron-number axis is placed only below the green panel.
     #ax.set_title(f"{model_name}")
-    cb = plt.colorbar(sc, ax=ax, fraction=0.04, pad=0.02)
-    cb.set_label(r"$\Delta M_{\rm pred}-\Delta M_{\rm exp}$ (keV)")
+    cax = fig.add_subplot(gs[:, 2])
+    cb = fig.colorbar(sc, cax=cax)
+    cb.set_label(r"$\Delta M_{\rm pred}-\Delta M_{\rm exp}$ (keV)", fontsize=26)
+    cb.ax.tick_params(labelsize=20)
 
-    axl = fig.add_subplot(gs[0, 0], sharey=ax)
-    axl.scatter(err, Z, s=8, alpha=0.45, color="tab:blue")
-    axl.axvline(0, color="k", lw=0.8); axl.set_xlabel("error (keV)")
-    axl.set_xlim(-clip * 1.6, clip * 1.6); axl.invert_xaxis()
+    axl.scatter(err, Z, s=8, alpha=0.45, color=PROTON_PANEL_COLOR)
+    axl.axvline(0, color="k", lw=0.9)
+    # Keep this short and place it below the side-panel tick labels, in the
+    # otherwise unused lower-left corner of the layout.
+    axl.set_xlabel("Signed\nerror\n(keV)", fontsize=20, labelpad=36)
+    axl.xaxis.set_label_coords(0.20, -0.10)
+    axl.set_ylabel("Proton number ($Z$)", fontsize=26, color="black")
+    axl.tick_params(axis="y", colors="black", labelsize=18)
+    axl.set_xlim(-clip * 1.6, clip * 1.6)
+    axl.invert_xaxis()
+    # Keep Z ticks and its label only on the blue panel.
+    ax.tick_params(axis="y", left=False, labelleft=False)
+    axl.tick_params(axis="x", labelsize=18)
+    ax.tick_params(axis="x", bottom=False, labelbottom=False)
 
     axb = fig.add_subplot(gs[1, 1], sharex=ax)
-    axb.scatter(N, err, s=8, alpha=0.45, color="tab:green")
-    axb.axhline(0, color="k", lw=0.8); axb.set_ylabel("error (keV)")
-    axb.set_xlabel("Neutron number $N$"); axb.set_ylim(-clip * 1.6, clip * 1.6)
-    plt.setp(ax.get_xticklabels(), visible=False)
+    axb.scatter(N, err, s=8, alpha=0.45, color=NEUTRON_PANEL_COLOR)
+    axb.axhline(0, color="k", lw=0.9)
+    # Signed error is written only once, on the side panel.
+    axb.set_ylabel("")
+    axb.set_xlabel("Neutron number ($N$)", fontsize=26, labelpad=6)
+    axb.set_ylim(-clip * 1.6, clip * 1.6)
+    axb.tick_params(axis="both", labelsize=20)
     fig.add_subplot(gs[1, 0]).axis("off")
     return _save(fig, f"{model_name}_signed_error.png")
 
@@ -210,8 +248,10 @@ def plot_predictions(N, Z, preds_keV, acts_keV, model_name):
     ax = fig.add_subplot(111, projection="3d")
     ax.scatter(N, Z, preds_keV, color="gray", alpha=0.55, s=14, label="predicted")
     ax.scatter(N, Z, acts_keV, color="red", alpha=0.25, s=14, label="experimental")
-    ax.set_xlabel("Neutron number $N$"); ax.set_ylabel("Proton number $Z$")
-    ax.set_zlabel("Mass excess (keV)", labelpad=14)
+    ax.set_xlabel("Neutron number $N$", fontsize=22); 
+    ax.set_ylabel("Proton number $Z$", fontsize=22)
+    ax.set_zlabel("Mass excess (keV)", labelpad=14, fontsize=22)
+    
     #ax.set_title(f"Predicted vs experimental mass excess — {model_name}")
     ax.legend()
     return _save(fig, f"{model_name}_3D_predictions.png")
@@ -224,8 +264,9 @@ def plot_pred_vs_true(preds_keV, acts_keV, model_name):
     ax.plot(np.array(lim) / 1000, np.array(lim) / 1000, "k--", lw=1, label="perfect")
     ax.scatter(acts_keV / 1000, preds_keV / 1000, s=20, alpha=0.6,
                color="#0ea5e9", edgecolors="none")
-    ax.set_xlabel("experimental mass excess (MeV)")
-    ax.set_ylabel("predicted mass excess (MeV)")
+    ax.set_xlabel("experimental mass excess (MeV)", fontsize=22)
+    ax.set_ylabel("predicted mass excess (MeV)", fontsize=22)
+    
     #ax.set_title(f"{model_name}"); ax.legend(loc="upper left")
     return _save(fig, f"{model_name}_pred_vs_true.png")
 
@@ -235,7 +276,8 @@ def plot_training_logs(logs, model_name):
     fig, ax = plt.subplots(figsize=(7.6, 4.8))
     ax.plot(ep, logs["train_losses"], "o-", ms=3, label="train")
     ax.plot(ep, logs["val_losses"], "s-", ms=3, label="validation")
-    ax.set_xlabel("epoch"); ax.set_ylabel("loss (Huber, standardised residual)")
+    ax.set_xlabel("epoch", fontsize=22); 
+    ax.set_ylabel("loss (Huber, standardised residual)", fontsize=22)
     ax.legend(); 
     #ax.set_title(f"{model_name} — loss")
     _save(fig, f"{model_name}_loss.png")
@@ -263,26 +305,85 @@ def plot_stage_waterfall(stage_rmse, model_name):
     return _save(fig, f"{model_name}_stage_waterfall.png")
 
 
+def _feature_symbol(name):
+    labels = {
+        # Categorical features
+        "Zshell_category": r"$S_Z$",
+        "Nshell_category": r"$S_N$",
+        "ZEO": r"$\mathrm{ZEO}$",
+        "NEO": r"$\mathrm{NEO}$",
+        "deltaN": r"$\Delta N$",
+        "deltaZ": r"$\Delta Z$",
+
+        # Nuclear and liquid-drop features
+        "N": r"$N$",
+        "Z": r"$Z$",
+        "A": r"$A$",
+        "A^2/3": r"$A^{2/3}$",
+        "Z(Z-1)/A^(1/3)": r"$Z(Z-1)/A^{1/3}$",
+        "(N-Z)^2/A": r"$(N-Z)^2/A$",
+        "(N-Z)/A": r"$(N-Z)/A$",
+        "N/Z": r"$N/Z$",
+        "promiscuity": r"$P$",
+
+        # Neighbour-availability indicators
+        "neighbor_N_plus_1_exists": r"$I_{N+1}$",
+        "neighbor_N_minus_1_exists": r"$I_{N-1}$",
+        "neighbor_Z_plus_1_exists": r"$I_{Z+1}$",
+        "neighbor_Z_minus_1_exists": r"$I_{Z-1}$",
+
+        # Anchor-related features
+        "anchor": r"$a_{\mathrm{anc}}$",
+        "anchor_has": r"$I_{\mathrm{anc}}$",
+        "anchor_n": r"$n_{\mathrm{anc}}$",
+        "anchor_mean_dist": r"$d_{\mathrm{anc}}$",
+        "anchor_max_dist": r"$d^{\max}_{\mathrm{anc}}$",
+        "anchor_scatter": r"$\sigma_{\mathrm{anc}}$",
+        "anchor_parity_match": r"$f^{\mathrm{parity}}_{\mathrm{anc}}$",
+    }
+    return labels.get(name, name)
+
+
 def visualize_attention_weights(attention_weights, feature_names, model_name):
     if not attention_weights:
         print("   no attention weights to visualise")
         return None
+
     first = np.stack([np.asarray(a) for a in attention_weights[:512]])
     mean_attn = first.mean(axis=(0, 1))
+
     if mean_attn.ndim == 3:
         mean_attn = mean_attn.mean(axis=0)
+
     k = mean_attn.shape[0]
-    names = feature_names[:k] if len(feature_names) >= k else \
-        feature_names + [f"f{i}" for i in range(len(feature_names), k)]
+    names = (
+        feature_names[:k]
+        if len(feature_names) >= k
+        else feature_names + [f"f{i}" for i in range(len(feature_names), k)]
+    )
+    labels = [_feature_symbol(name) for name in names]
 
-    fig, ax = plt.subplots(figsize=(max(8, 0.55 * k), max(6.5, 0.5 * k)))
-    sns.heatmap(mean_attn, xticklabels=names, yticklabels=names, cmap="viridis",
-                annot=(k <= 12), fmt=".2f", ax=ax)
-    #ax.set_title(f"{model_name} — mean attention weights")
-    ax.set_xlabel("key (feature)"); ax.set_ylabel("query (feature)")
+    fig, ax = plt.subplots(
+        figsize=(max(8, 0.55 * k), max(6.5, 0.5 * k))
+    )
+
+    sns.heatmap(
+        mean_attn,
+        xticklabels=labels,
+        yticklabels=labels,
+        cmap="viridis",
+        annot=(k <= 12),
+        fmt=".2f",
+        ax=ax,
+    )
+
+    # No title: the caption defines the figure.
+    ax.set_xlabel("Key feature", fontsize=26)
+    ax.set_ylabel("Query feature", fontsize=26)
+    ax.tick_params(axis="both", labelsize=22)
     plt.xticks(rotation=45, ha="right")
-    return _save(fig, f"{model_name}_attention.png")
 
+    return _save(fig, f"{model_name}_attention.png")
 
 def compute_feature_importance_from_attention(attention_weights, feature_names,
                                               model_name, seed):

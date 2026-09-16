@@ -1,0 +1,12 @@
+\begin{table}[htbp]\centering
+\caption{Extrapolation performance on AME2020 for each train/test separation. Values are mean $\pm$ standard deviation over 5 seeds, each with its own random train/validation split inside the development region. The test anchor reads only development masses.}
+\label{tab:extrapolation}
+\begin{tabular}{llcccc}\hline\hline
+Separation & Model & RMSE (keV) & MAE (keV) & RMSE (keV) & MAE (keV) \\
+ & & (Validation) & (Validation) & (Test) & (Test) \\ \hline
+(b) neutron-rich & LSMF & $2186 \pm 107$ & $1669 \pm 61$ & $3928 \pm 53$ & $3229 \pm 54$ \\
+ & LSMF + anchor & $451 \pm 35$ & $293 \pm 21$ & $1762 \pm 54$ & $1096 \pm 27$ \\
+ & LSMF + Transformer & $448 \pm 42$ & $264 \pm 28$ & $1368 \pm 113$ & $977 \pm 75$ \\
+ & LSMF + anchor + Transformer & $286 \pm 26$ & $173 \pm 11$ & $1780 \pm 63$ & $1090 \pm 47$ \\
+\hline
+\hline\end{tabular}\end{table}

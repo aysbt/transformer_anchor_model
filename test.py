@@ -97,7 +97,8 @@ def main(args):
     t0 = time.time()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    experiment = f"{args.model}_gated_attention_anchored_s{args.seed}"
+    run_name = args.model if args.use_anchor else f"{args.model}_noanchor"
+    experiment = f"{run_name}_gated_attention_anchored_s{args.seed}"
     ckpt = f"model_checkpoint/best_{experiment}.pth"
     stats_path = f"model_checkpoint/preprocess_{experiment}.pth"
 
@@ -118,7 +119,7 @@ def main(args):
         num_cont_features=len(cont_feats),
         categorical_feature_sizes=cat_sizes,
         categorical_features=cat_feats, **arch).to(device)
-    model.load_state_dict(torch.load(ckpt, map_location=device))
+    model.load_state_dict(torch.load(ckpt, map_location=device, weights_only=True))
     model.eval()
 
     trainval_df = pd.read_csv(args.trainval_csv)
@@ -134,13 +135,17 @@ def main(args):
 
     target_mean, target_std = stats["target_mean"], stats["target_std"]
     regimes = args.regimes.split(",")
+    if not use_anchor:
+        # the dictionary does not enter an LSMF + Transformer prediction
+        regimes = ["historical"]
+        print("   no anchor: prediction is LSMF + Transformer, regimes not applicable")
     summary, per_regime = [], {}
 
     for regime in regimes:
         banner(f"REGIME '{regime}'  --  {REGIME_NOTES[regime]}", "-")
         ctx = build_context(regime, bundle["anchor_state"], trainval_df,
-                            test_df, args.seed) if use_anchor else None
-        if ctx is not None:
+                            test_df, args.seed)
+        if use_anchor:
             print(f"   anchor dictionary size : {ctx.dict_size_} nuclei")
 
         loader = get_eval_dataloader(
@@ -152,21 +157,22 @@ def main(args):
             model, loader, device, target_mean, target_std)
 
         m_full = ev.compute_metrics(preds, acts)
-        ev.print_metrics(m_full, f"{args.model} — test set, regime '{regime}' (keV)")
+        ev.print_metrics(m_full, f"{run_name} — test set, regime '{regime}' (keV)")
 
-        if use_anchor:
-            m_s1 = ev.compute_metrics(ctx.baseline.predict(N.astype(int),
-                                                           Z.astype(int)), acts)
+        m_s1 = ev.compute_metrics(ctx.baseline.predict(N.astype(int),
+                                                       Z.astype(int)), acts)
+        print("\n   stage decomposition")
+        print(ev.fmt_row(m_s1, "S1  LSMF only"))
+        if not use_anchor:
+            print(ev.fmt_row(m_full, "S1+S3  + transformer"))
+        else:
             m_s2 = ev.compute_metrics(offsets, acts)
-            print("\n   stage decomposition")
-            print(ev.fmt_row(m_s1, "S1  LSMF only"))
             print(ev.fmt_row(m_s2, "S1+S2  + local anchor"))
             print(ev.fmt_row(m_full, "S1+S2+S3  + transformer"))
             gain = m_s2["rmse_keV"] - m_full["rmse_keV"]
             print(f"\n   network contribution   : {gain:,.1f} keV RMSE reduction "
                   f"({100*gain/max(m_s2['rmse_keV'],1e-9):.1f}% of the anchor-only error)")
 
-            has = loader.dataset.data["anchor_has"].to_numpy() > 0
             # anchor_has was standardised; recover the flag from the raw context
             _, feats = ctx.offset_and_features(N.astype(int), Z.astype(int))
             has = feats["anchor_has"] > 0
@@ -180,7 +186,7 @@ def main(args):
         reg = ev.compute_region_metrics(N, Z, preds, acts)
         ev.print_region_table(reg, f"regional performance — regime '{regime}'")
 
-        tag = f"{args.model}_s{args.seed}_test_{regime}"
+        tag = f"{run_name}_s{args.seed}_test_{regime}"
         ev.plot_error_diagnostics(N, Z, preds, acts, tag)
         ev.plot_error_distribution(preds, acts, tag)
         ev.plot_pred_vs_true(preds, acts, tag)
@@ -188,23 +194,24 @@ def main(args):
         pd.DataFrame({"N": N, "Z": Z, "A": N + Z, "actual_keV": acts,
                       "predicted_keV": preds, "offset_keV": offsets,
                       "error_keV": preds - acts}).to_csv(
-            f"results/test_predictions_{args.model}_{args.seed}_{regime}.csv",
+            f"results/test_predictions_{run_name}_{args.seed}_{regime}.csv",
             index=False)
-        reg.assign(model=args.model, seed=args.seed, regime=regime).to_csv(
-            f"results/test_region_metrics_{args.model}_{args.seed}_{regime}.csv",
+        reg.assign(model=run_name, seed=args.seed, regime=regime).to_csv(
+            f"results/test_region_metrics_{run_name}_{args.seed}_{regime}.csv",
             index=False)
 
-        row = {**m_full, "model": args.model, "seed": args.seed, "regime": regime}
+        row = {**m_full, "model": run_name, "seed": args.seed, "regime": regime,
+               "rmse_s1_keV": m_s1["rmse_keV"], "mae_s1_keV": m_s1["mae_keV"]}
         if use_anchor:
-            row["rmse_s1_keV"] = m_s1["rmse_keV"]
             row["rmse_s2_keV"] = m_s2["rmse_keV"]
+            row["mae_s2_keV"] = m_s2["mae_keV"]
         summary.append(row)
         per_regime[regime] = m_full
 
     df = pd.DataFrame(summary)
-    df.to_csv(f"results/metrics_test_{args.model}_{args.seed}.csv", index=False)
+    df.to_csv(f"results/metrics_test_{run_name}_{args.seed}.csv", index=False)
 
-    banner(f"REGIME COMPARISON  {args.model}  seed {args.seed}")
+    banner(f"REGIME COMPARISON  {run_name}  seed {args.seed}")
     print(f"\n   {'regime':<13}{'n':>5}{'RMSE':>10}{'MAE':>10}{'median':>9}"
           f"{'<250keV':>9}   note")
     print("   " + "-" * 92)
@@ -212,7 +219,7 @@ def main(args):
         print(f"   {r['regime']:<13}{r['n']:>5}{r['rmse_keV']:>10.1f}"
               f"{r['mae_keV']:>10.1f}{r['median_abs_keV']:>9.1f}"
               f"{r['within_250keV']*100:>8.1f}%   {REGIME_NOTES[r['regime']]}")
-    print(f"\n   saved results/metrics_test_{args.model}_{args.seed}.csv")
+    print(f"\n   saved results/metrics_test_{run_name}_{args.seed}.csv")
     print(f"   runtime {time.time()-t0:.0f}s")
     return per_regime
 
@@ -220,9 +227,12 @@ def main(args):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="AnchoredFullModel")
-    ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--seed", type=int, default=17)
     ap.add_argument("--trainval_csv", default="data/trainval.csv")
     ap.add_argument("--test_csv", default="data/test.csv")
     ap.add_argument("--batch_size", type=int, default=32)
     ap.add_argument("--regimes", default="historical,train,loo")
-    main(ap.parse_args())
+    ap.add_argument("--use_anchor", type=int, default=1)
+    a = ap.parse_args()
+    a.use_anchor = bool(a.use_anchor)
+    main(a)

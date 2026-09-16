@@ -1,0 +1,42 @@
+{
+  "input": "data/mass20.txt",
+  "format": "ame",
+  "splits": [
+    "neutron_rich"
+  ],
+  "measured": null,
+  "measured_format": "ame",
+  "anchor": "both",
+  "tail_fraction": 0.2,
+  "z_cut": 82,
+  "val_fraction": 0.3,
+  "seeds": [
+    12,
+    17,
+    33,
+    42,
+    89
+  ],
+  "min_nz": 8,
+  "anchor_radius": 3,
+  "anchor_min_neighbors": 14,
+  "epochs": 200,
+  "patience": 200,
+  "batch_size": 32,
+  "lr": 0.002,
+  "threads": 4,
+  "verbose_every": 20,
+  "skip_sanity_check": false,
+  "table_source": null,
+  "outdir": "results_nrich",
+  "prepare_only": false,
+  "architecture": {
+    "d_model": 128,
+    "num_heads": 8,
+    "d_ff": 512,
+    "num_layers": 4,
+    "dropout": 0.12,
+    "pooling_type": "gated_attention"
+  },
+  "n_nuclei": 2456
+}
