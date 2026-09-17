@@ -49,6 +49,8 @@ def load_table(path, fmt='csv', min_nz=8):
                 z, a = int(line[:4]), int(line[4:8])
             except ValueError:
                 continue  # textual header
+            if not line[33:43].strip():
+                continue  # experimental-only row (light nuclei, a few superheavy)
             try:
                 mass = float(line[33:43])
             except ValueError as exc:
