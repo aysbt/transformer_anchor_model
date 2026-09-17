@@ -13,10 +13,9 @@ as in the chronological study. The test region is fixed by the separation.
     python run_extrapolation.py --input data/mass20.txt --format ame \
         --splits neutron_rich heavy --outdir results_extrap_ame
 
-    # theory table, same separations plus train-on-measured
+    # theory table only (all masses, splits and fits from the table)
     python run_extrapolation.py --input data/mass-frdm95.dat --format frdm95 \
-        --splits neutron_rich heavy unmeasured --measured data/mass20.txt \
-        --outdir results_extrap_frdm95
+        --splits random neutron_rich heavy --anchor off --outdir results_frdm95
 """
 import argparse
 import json
@@ -34,7 +33,7 @@ ARCH = dict(d_model=128, num_heads=8, d_ff=512, num_layers=4,
             dropout=.12, pooling_type='gated_attention')      # = train.py
 MODELS = ['LSMF', 'LSMF+anchor', 'LSMF+Transformer', 'LSMF+anchor+Transformer']
 LABELS = {'random': '(a) random', 'neutron_rich': '(b) neutron-rich',
-          'heavy': '(c) $Z>82$', 'unmeasured': 'unmeasured'}
+          'heavy': '(c) heavy', 'unmeasured': 'unmeasured'}   # heavy gets Z cut in main()
 BINS = [0, 1, 2, 3, 5, 10, 20, np.inf]
 
 
@@ -62,38 +61,49 @@ def train_network(arrays, prep, run, seed, args):
     from trainer import train_model
     random.seed(seed); np.random.seed(seed); torch.manual_seed(seed)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    loaders = {k: DataLoader(TensorDataset(torch.tensor(a[0], dtype=torch.long),
-                                           torch.tensor(a[1]), torch.tensor(a[2])),
-                             batch_size=args.batch_size, shuffle=(k == 'train'))
-               for k, a in arrays.items()}
+    data = {k: TensorDataset(torch.tensor(a[0], dtype=torch.long),
+                             torch.tensor(a[1]), torch.tensor(a[2]))
+            for k, a in arrays.items()}
+    # unshuffled loaders for prediction; shuffled one only for training
+    loaders = {k: DataLoader(d, batch_size=args.batch_size) for k, d in data.items()}
+    train_loader = DataLoader(data['train'], batch_size=args.batch_size, shuffle=True)
     model = TransformerMassExcessPredictor(len(prep.cont),
             [len(prep.maps[c])+1 for c in prep.cat], prep.cat, **ARCH).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=.5, patience=6)
     checkpoint = str(run/'best.pth')
-    model, logs = train_model(loaders['train'], loaders['val'], model,
+    model, logs = train_model(train_loader, loaders['val'], model,
                               torch.nn.SmoothL1Loss(beta=.25), optimizer, scheduler,
                               checkpoint, args.epochs, prep.target_std,
                               patience=args.patience, verbose_every=args.verbose_every)
     model.load_state_dict(torch.load(checkpoint, map_location=device, weights_only=True))
     pd.DataFrame(logs).to_csv(run/'training.csv', index=False)
-    return {k: predict(model, loaders[k], prep, device) for k in ['val', 'test']}
+    return {k: predict(model, loaders[k], prep, device) for k in ['train', 'val', 'test']}
 
 
-def plot_splits(all_parts, path):
-    fig, axes = plt.subplots(len(all_parts), 1, figsize=(6, 3.2*len(all_parts)),
+def plot_splits(all_parts, path, z_cut):
+    # same style as the paper split figure (prepare_data.draw_split_figure)
+    fig, axes = plt.subplots(len(all_parts), 1, figsize=(10.5, 7.5*len(all_parts)),
                              sharex=True, squeeze=False)
     for ax, (separation, parts) in zip(axes[:, 0], all_parts.items()):
-        for name, label, color, marker in [('train', 'Training', 'tab:blue', 'o'),
-                                           ('val', 'Validation', 'tab:orange', 's'),
-                                           ('test', 'Test', 'tab:green', 'D')]:
-            ax.scatter(parts[name].N, parts[name].Z, s=5, c=color, marker=marker,
-                       label=f'{label} ({len(parts[name])})')
-        ax.set_ylabel('Proton number Z')
-        ax.text(.97, .06, LABELS[separation], transform=ax.transAxes, ha='right')
-        ax.legend(loc='upper left', fontsize=9)
-    axes[-1, 0].set_xlabel('Neutron number N')
-    fig.tight_layout(); fig.savefig(path, dpi=250); plt.close(fig)
+        ax.scatter(parts['train'].N, parts['train'].Z, s=24, alpha=0.30,
+                   color='gray', label='Train')
+        ax.scatter(parts['val'].N, parts['val'].Z, s=28, alpha=0.75, marker='^',
+                   color='indigo', label='Validation')
+        ax.scatter(parts['test'].N, parts['test'].Z, s=42, alpha=0.95, marker='D',
+                   color='darkorange', label='Test')
+        if separation == 'heavy':
+            ax.axhline(z_cut + 0.5, color='black', ls='--', lw=1.2)
+        ax.text(.97, .05, LABELS[separation], transform=ax.transAxes,
+                ha='right', fontsize=24)
+        ax.set_ylabel('Proton Number (Z)', fontsize=24)
+        ax.tick_params(axis='both', which='major', labelsize=18)
+        ax.grid(alpha=0.30)
+        ax.legend(fontsize=24, loc='upper left')
+    axes[-1, 0].set_xlabel('Neutron Number (N)', fontsize=24)
+    fig.tight_layout()
+    fig.savefig(path, dpi=350, bbox_inches='tight')
+    plt.close(fig)
 
 
 def write_latex(summary, path, n_seeds, source):
@@ -140,6 +150,7 @@ def main(args):
     variants = [False, True] if args.anchor == 'both' else [args.anchor == 'on']
     (root/'manifest.json').write_text(json.dumps(dict(vars(args), architecture=ARCH,
                                                       n_nuclei=len(df)), indent=2))
+    LABELS['heavy'] = f'(c) $Z>{args.z_cut}$'
     print(f'{args.input}: {len(df)} nuclei (N, Z >= {args.min_nz})')
 
     records, first_parts = [], {}
@@ -163,7 +174,7 @@ def main(args):
                 arrays = {k: prep.transform(parts[k], pools[k]) for k in parts}
                 static = 'LSMF+anchor' if use_anchor else 'LSMF'
                 network = 'LSMF+anchor+Transformer' if use_anchor else 'LSMF+Transformer'
-                for name in ['val', 'test']:
+                for name in ['train', 'val', 'test']:
                     records.append(dict(separation=separation, seed=seed, split=name,
                                         model=static, anchor_coverage=arrays[name][4].mean(),
                                         **metrics(parts[name][TARGET], arrays[name][3])))
@@ -173,7 +184,7 @@ def main(args):
                 (run/tag).mkdir(exist_ok=True)
                 predicted = train_network({k: a[:3] for k, a in arrays.items()},
                                           prep, run/tag, seed, args)
-                for name in ['val', 'test']:
+                for name in ['train', 'val', 'test']:
                     frame = parts[name].copy()
                     frame['static_keV'] = arrays[name][3]
                     frame['predicted_keV'] = arrays[name][3] + predicted[name]
@@ -195,7 +206,7 @@ def main(args):
                     pd.DataFrame(grouped).to_csv(run/tag/f'{name}_distance_metrics.csv', index=False)
                 pd.DataFrame(records).to_csv(root/'metrics.csv', index=False)
 
-    plot_splits(first_parts, root/'splits.png')
+    plot_splits(first_parts, root/'splits.png', args.z_cut)
     result = pd.DataFrame(records)
     result.to_csv(root/'metrics.csv', index=False)
     summary = (result.groupby(['separation', 'split', 'model'], sort=False)
@@ -207,7 +218,7 @@ def main(args):
     summary = summary.sort_values(
         ['separation', 'split', 'model'],
         key=lambda c: c.map({**{s: i for i, s in enumerate(args.splits)},
-                             'val': 0, 'test': 1, **{m: i for i, m in enumerate(MODELS)}}))
+                             'train': -1, 'val': 0, 'test': 1, **{m: i for i, m in enumerate(MODELS)}}))
     summary.to_csv(root/'summary.csv', index=False)
     source = args.table_source or {'ame': 'AME2020', 'hfb14': 'the HFB-14 table',
                                    'frdm95': 'the FRDM95 table'}.get(args.format, args.input)
@@ -222,19 +233,19 @@ if __name__ == '__main__':
     p.add_argument('--input', required=True)
     p.add_argument('--format', choices=['csv', 'ame', 'hfb14', 'frdm95'], default='csv')
     p.add_argument('--splits', nargs='+', choices=SEPARATIONS, default=['neutron_rich', 'heavy'])
-    p.add_argument('--measured', help='AME table; required for the unmeasured separation')
+    p.add_argument('--measured', help='only for the unmeasured separation (mixes in AME)')
     p.add_argument('--measured-format', choices=['ame', 'csv'], default='ame')
     p.add_argument('--anchor', choices=['both', 'on', 'off'], default='both')
     p.add_argument('--tail-fraction', type=float, default=.20)
-    p.add_argument('--z-cut', type=int, default=82)
+    p.add_argument('--z-cut', type=int, default=80)
     p.add_argument('--val-fraction', type=float, default=.30)
     p.add_argument('--seeds', type=int, nargs='+', default=[12, 17, 33, 42, 89])
     p.add_argument('--min-nz', type=int, default=8)
     p.add_argument('--anchor-radius', type=int, default=3)
     p.add_argument('--anchor-min-neighbors', type=int, default=14)
-    # training defaults = what train.py / run_multiseed.py used for the paper tables
+    # lr / batch / epochs as in train.py; early stopping is active here (patience 20)
     p.add_argument('--epochs', type=int, default=200)
-    p.add_argument('--patience', type=int, default=200)
+    p.add_argument('--patience', type=int, default=20)
     p.add_argument('--batch-size', type=int, default=32)
     p.add_argument('--lr', type=float, default=2e-3)
     p.add_argument('--threads', type=int, default=4)
