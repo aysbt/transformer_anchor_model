@@ -23,7 +23,8 @@ import matplotlib.pyplot as plt
 MODELS = ["LSMF+Transformer", "LSMF+anchor+Transformer"]
 SPLITS = [("chronological", "AME2016 → AME2020", "tab:blue"),
           ("neutron_rich", "Neutron-rich", "tab:orange"),
-          ("heavy", "Heavy ($Z>82$)", "tab:green")]
+          ("heavy", "Heavy ($Z>82$)", "tab:green"),
+          ("unmeasured", "Measured → unmeasured", "tab:red")]
 GROUPS = [("val", "Validation"), ("test", "Test")]
 
 
@@ -58,6 +59,7 @@ def improvement(df):
 
 
 def main(args):
+    SPLITS[2] = ("heavy", f"Heavy ($Z>{args.z_cut}$)", "tab:green")
     frames = []
     if args.chrono:
         frames.append(chrono_rows(args.chrono, args.chrono_model))
@@ -101,5 +103,6 @@ if __name__ == "__main__":
     ap.add_argument("--chrono-model", default="AnchoredFullModel")
     ap.add_argument("--extrap", nargs="*", default=[],
                     help="run_extrapolation.py output folders")
+    ap.add_argument("--z-cut", type=int, default=80)
     ap.add_argument("--out", type=Path, default=Path("improvement_index.png"))
     main(ap.parse_args())
