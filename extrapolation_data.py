@@ -120,18 +120,24 @@ def split_table(df, separation, tail_fraction=.20, z_cut=82, val_fraction=.30,
 
 
 class ResidualPreprocessor:
-    """Stage 1 always; Stage 2 (local anchor) only when use_anchor=True."""
+    """Stage 1 always; Stage 2 (local anchor) only when use_anchor=True.
 
-    def __init__(self, use_anchor=False, max_radius=3, min_neighbors=14):
+    features: optional list of column names to use; defaults to the global
+              FEATURES list (= AnchoredFullModel feature set).
+    """
+
+    def __init__(self, use_anchor=False, max_radius=3, min_neighbors=14,
+                 features=None):
         self.use_anchor = use_anchor
         self.max_radius = max_radius
         self.min_neighbors = min_neighbors
+        self._features = features if features is not None else FEATURES
 
     def fit(self, train):
         self.baseline = LSMFBaseline().fit(train.N, train.Z, train[TARGET])
         f, offset = self.features(train, pool=train)
-        self.cat = [x for x in FEATURES if x in CATEGORICAL]
-        self.cont = [x for x in FEATURES if x not in CATEGORICAL]
+        self.cat = [x for x in self._features if x in CATEGORICAL]
+        self.cont = [x for x in self._features if x not in CATEGORICAL]
         if self.use_anchor:
             self.cont += ANCHOR_FEATURES
         self.maps = {c: sorted(f[c].unique().tolist()) for c in self.cat}
