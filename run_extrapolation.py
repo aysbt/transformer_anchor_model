@@ -28,6 +28,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from extrapolation_data import (load_table, sanity_check, split_table, ResidualPreprocessor,
                                 distances, TARGET, SEPARATIONS)
+from train import FEATURE_SETS
 
 ARCH = dict(d_model=128, num_heads=8, d_ff=512, num_layers=4,
             dropout=.12, pooling_type='gated_attention')      # = train.py
@@ -170,7 +171,8 @@ def main(args):
 
             for use_anchor in variants:
                 prep = ResidualPreprocessor(use_anchor, args.anchor_radius,
-                                            args.anchor_min_neighbors).fit(parts['train'])
+                                            args.anchor_min_neighbors,
+                                            features=FEATURE_SETS[args.model]).fit(parts['train'])
                 arrays = {k: prep.transform(parts[k], pools[k]) for k in parts}
                 static = 'LSMF+anchor' if use_anchor else 'LSMF'
                 network = 'LSMF+anchor+Transformer' if use_anchor else 'LSMF+Transformer'
@@ -235,6 +237,8 @@ if __name__ == '__main__':
     p.add_argument('--splits', nargs='+', choices=SEPARATIONS, default=['neutron_rich', 'heavy'])
     p.add_argument('--measured', help='only for the unmeasured separation (mixes in AME)')
     p.add_argument('--measured-format', choices=['ame', 'csv'], default='ame')
+    p.add_argument('--model', choices=list(FEATURE_SETS), default='AnchoredFullModel',
+                   help='feature set / model variant (default: AnchoredFullModel)')
     p.add_argument('--anchor', choices=['both', 'on', 'off'], default='both')
     p.add_argument('--tail-fraction', type=float, default=.20)
     p.add_argument('--z-cut', type=int, default=80)
