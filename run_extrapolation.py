@@ -31,7 +31,7 @@ from extrapolation_data import (load_table, sanity_check, split_table, ResidualP
 from train import FEATURE_SETS
 
 ARCH = dict(d_model=128, num_heads=8, d_ff=512, num_layers=4,
-            dropout=.12, pooling_type='gated_attention')      # = train.py
+            dropout=.10, pooling_type='gated_attention')      # = train.py
 MODELS = ['LSMF', 'LSMF+anchor', 'LSMF+Transformer', 'LSMF+anchor+Transformer']
 LABELS = {'random': '(a) random', 'neutron_rich': '(b) neutron-rich',
           'heavy': '(c) heavy', 'unmeasured': 'unmeasured'}   # heavy gets Z cut in main()
@@ -71,7 +71,7 @@ def train_network(arrays, prep, run, seed, args):
     model = TransformerMassExcessPredictor(len(prep.cont),
             [len(prep.maps[c])+1 for c in prep.cat], prep.cat, **ARCH).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=.5, patience=6)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=.5, patience=20)
     checkpoint = str(run/'best.pth')
     model, logs = train_model(train_loader, loaders['val'], model,
                               torch.nn.SmoothL1Loss(beta=.25), optimizer, scheduler,
@@ -259,7 +259,7 @@ if __name__ == '__main__':
     p.add_argument('--epochs', type=int, default=200)
     p.add_argument('--patience', type=int, default=20)
     p.add_argument('--batch-size', type=int, default=32)
-    p.add_argument('--lr', type=float, default=2e-3)
+    p.add_argument('--lr', type=float, default=1e-3)
     p.add_argument('--threads', type=int, default=4)
     p.add_argument('--verbose-every', type=int, default=20)
     p.add_argument('--skip-sanity-check', action='store_true',
