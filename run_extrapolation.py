@@ -142,6 +142,14 @@ def main(args):
     df = load_table(args.input, args.format, args.min_nz)
     if args.format != 'ame' and not args.skip_sanity_check:
         sanity_check(df)
+
+    # For theory tables, replace the empirical magic-number feature function
+    # with one that also includes theory-predicted sub-shell closures.
+    if args.format in ('frdm95', 'hfb14'):
+        from theory_features import TheoryFeatures
+        import extrapolation_data as _ed
+        _ed.add_physics_features = TheoryFeatures(df).add_features
+        print()
     measured = (load_table(args.measured, args.measured_format, args.min_nz)
                 if args.measured else None)
     root = Path(args.outdir)
